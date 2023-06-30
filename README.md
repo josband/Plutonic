@@ -1,4 +1,4 @@
-# Plutonic
+# 🌌 Plutonic 🌌
 Plutonic is a stock trading bot written in python. It will be operable through a web interface or via the command line. While this project will purely be written in python for now, the future plan is for the core of the bot to be written in a systems level language for better runtime performance.
 
 ## Why make Plutonic?
