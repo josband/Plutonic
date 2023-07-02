@@ -1,3 +1,7 @@
+"""
+Functionailty needed for logging
+"""
+
 class Color:
     PURPLE = '\033[95m'
     CYAN = '\033[96m'
@@ -11,13 +15,25 @@ class Color:
     END = '\033[0m' # back to default
 
 def info(*args) -> None:
+    """
+    For loggging normal information
+    """
     print(f'[{Color.BOLD}INFO{Color.END}]:', *args)
 
 def success(*args) -> None:
+    """
+    For loggging successful operations
+    """
     print(f'[{Color.GREEN + Color.BOLD}SUCCESS{Color.END}]:', *args)
 
 def warning(*args) -> None:
+    """
+    For loggging any warnings
+    """
     print(f'[{Color.YELLOW + Color.BOLD}WARNING{Color.END}]:', *args)
 
 def error(*args) -> None:
+    """
+    For loggging failures
+    """
     print(f'[{Color.RED + Color.BOLD}ERROR{Color.END}]:', *args)

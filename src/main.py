@@ -1,13 +1,17 @@
-from dotenv import load_dotenv
-from plutonic import Plutonic
-import argparse
+"""
+Main file where Plutonic is initialized and ran.
+"""
+
 import os
+import argparse
+import dotenv
+from plutonic import Plutonic
 
 # Set up argument parsing
 parser = argparse.ArgumentParser()
 
 # Load .env file and get API keys
-load_dotenv()
+dotenv.load_dotenv()
 api_key = os.environ['ALPACA_API_KEY']
 secret_key = os.environ['ALPACA_API_SECRET']
 
