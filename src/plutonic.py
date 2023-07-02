@@ -22,8 +22,14 @@ class Plutonic:
 
         utils.logger.success('Initialization Complete')
 
-    def execute_buy() -> None:
+    def execute_buy(self) -> None:
+        """
+        Executes a buy for the bot
+        """
         pass
 
-    def execute_sell() -> None:
+    def execute_sell(self) -> None:
+        """
+        Executes a sell for the bot
+        """
         pass
