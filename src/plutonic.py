@@ -13,6 +13,9 @@ class Plutonic:
 
     def __init__(self, api_key=None, secret_key=None) -> None:
         utils.logger.info('Starting Plutonic Initialization')
+
+
+
         try:
             self.client = TradingClient(api_key, secret_key)
             utils.logger.success('Successfully Connected Trading Client')
@@ -26,10 +29,10 @@ class Plutonic:
         """
         Executes a buy for the bot
         """
-        pass
+        print("In buy")
 
     def execute_sell(self) -> None:
         """
         Executes a sell for the bot
         """
-        pass
+        print("In sell")
