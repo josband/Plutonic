@@ -1,0 +1,15 @@
+[package]
+name = "plutonic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+apca = "0.30.0"
+async-trait = "0.1.88"
+dotenv = "0.15.0"
+futures = "0.3.31"
+log = "0.4.27"
+simple_logger = "5.0.0"
+tokio = { version = "1.44.2", features = ["full"] }
+tokio-util = "0.7.15"
+websocket-util = "0.14.0"
