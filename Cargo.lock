@@ -1004,7 +1004,6 @@ dependencies = [
  "simple_logger",
  "tokio",
  "tokio-util",
- "websocket-util",
 ]
 
 [[package]]

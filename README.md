@@ -1,6 +1,6 @@
 # 🌌 Plutonic 🌌
 
-Plutonic is a stock trading bot written in 🦀*Rust*🦀. The plan is for early versions to be synchronous for the most part, but I hope to take advantage of multi-threading, asynchronous IO operations, or both. I will however, design this with modularity in mind and make this application event driven.
+Plutonic is a stock trading bot written in 🦀*Rust*🦀. This bot is asynchronous and utilizes tokio.
 
 ## How is Plutonic Made?
 
