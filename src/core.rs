@@ -13,13 +13,16 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 pub struct Plutonic {
-    ingestor: MarketDataManager,
+    data_manager: MarketDataManager,
     shutdown_token: CancellationToken,
 }
 
 impl Plutonic {
-    pub fn new() -> Self {
-        todo!()
+    pub fn new(client: Arc<Client>) -> Self {
+        let data_manager = MarketDataManager::connect(client.clone());
+        let shutdown_token = CancellationToken::new();
+
+        Self { data_manager, shutdown_token }
     }
 }
 
@@ -48,7 +51,7 @@ struct MarketDataIngestor {
     quote_tx: broadcast::Sender<Quote>,
     bar_tx: broadcast::Sender<Bar>,
     trade_tx: broadcast::Sender<Trade>,
-    cancel: CancellationToken
+    cancel: CancellationToken,
 }
 
 impl MarketDataIngestor {
@@ -58,13 +61,12 @@ impl MarketDataIngestor {
         quote_tx: broadcast::Sender<Quote>,
         bar_tx: broadcast::Sender<Bar>,
         trade_tx: broadcast::Sender<Trade>,
-        cancel: CancellationToken
+        cancel: CancellationToken,
     ) -> Self {
         // Connect to live market data, default to no data but establish the connection
-        let (stream, subscription) =
-            client.subscribe::<RealtimeData<IEX>>().await.unwrap();
+        let (stream, subscription) = client.subscribe::<RealtimeData<IEX>>().await.unwrap();
         info!("Connected to brokerage");
-        
+
         Self {
             stream,
             subscription,
@@ -72,8 +74,62 @@ impl MarketDataIngestor {
             quote_tx,
             bar_tx,
             trade_tx,
-            cancel
+            cancel,
         }
+    }
+
+    fn process_data(&self, data: Data) {
+        match data {
+            Data::Bar(bar) => {
+                if self.bar_tx.receiver_count() > 0 {
+                    let _ = self.bar_tx.send(bar);
+                }
+            },
+            Data::Quote(quote) => {
+                if self.quote_tx.receiver_count() > 0 {
+                    let _ = self.quote_tx.send(quote);
+                }
+            },
+            Data::Trade(trade) => {
+                if self.trade_tx.receiver_count() > 0 {
+                    let _ = self.trade_tx.send(trade);
+                }
+            }
+            _ => ()
+        }
+    }
+
+    async fn handle_command(&mut self, command: Command) {
+        match command {
+            Command::Subscribe(data) => self.subscribe(data).await,
+            Command::Unsubscribe(data) => self.unsubscribe(data).await
+        }
+    }
+
+    async fn unsubscribe(&mut self, data: MarketData) {
+        // Issue control message to data service and await response
+        let subscribe_future = self.subscription.unsubscribe(&data);
+        pin!(subscribe_future);
+        let () = drive(subscribe_future, &mut self.stream)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        info!("Successfully updated live market data feed");
+    }
+
+    async fn subscribe(&mut self, data: MarketData) {
+        // Issue control message to data service and await response
+        let subscribe_future = self.subscription.subscribe(&data);
+        pin!(subscribe_future);
+        let () = drive(subscribe_future, &mut self.stream)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        info!("Successfully updated live market data feed");
     }
 
     async fn run(&mut self) {
@@ -82,26 +138,7 @@ impl MarketDataIngestor {
             select! {
                 Some(message_result) = self.stream.next() => {
                     match message_result {
-                        Ok(Ok(data)) => {
-                            match data {
-                                Data::Bar(bar) => {
-                                    if self.bar_tx.receiver_count() > 0 {
-                                        let _ = self.bar_tx.send(bar);
-                                    }
-                                },
-                                Data::Quote(quote) => {
-                                    if self.quote_tx.receiver_count() > 0 {
-                                        let _ = self.quote_tx.send(quote);
-                                    }
-                                },
-                                Data::Trade(trade) => {
-                                    if self.trade_tx.receiver_count() > 0 {
-                                        let _ = self.trade_tx.send(trade);
-                                    }
-                                }
-                                _ => ()
-                            }
-                        },
+                        Ok(Ok(data)) => self.process_data(data),
                         // TODO: Give more detailed warning log
                         Ok(Err(_)) => {
                             warn!("Failed to parse stream message");
@@ -111,34 +148,7 @@ impl MarketDataIngestor {
                         },
                     }
                 },
-                Some(command) = self.command_rx.recv() => {
-                    match command {
-                        Command::Subscribe(data) => {
-                            // Issue control message to data service and await response
-                            let subscribe_future = self.subscription.subscribe(&data);
-                            pin!(subscribe_future);
-                            let () = drive(subscribe_future, &mut self.stream)
-                                .await
-                                .unwrap()
-                                .unwrap()
-                                .unwrap();
-
-                            info!("Successfully updated live market data feed");
-                        },
-                        Command::Unsubscribe(data) => {
-                            // Issue control message to data service and await response
-                            let subscribe_future = self.subscription.unsubscribe(&data);
-                            pin!(subscribe_future);
-                            let () = drive(subscribe_future, &mut self.stream)
-                                .await
-                                .unwrap()
-                                .unwrap()
-                                .unwrap();
-
-                            info!("Successfully updated live market data feed");
-                        }
-                    }
-                },
+                Some(command) = self.command_rx.recv() => self.handle_command(command).await,
                 _ = self.cancel.cancelled() => {
                     info!("Disconnecting from live data source");
                     break;
@@ -152,86 +162,24 @@ impl MarketDataManager {
     /// Connects to a live market data source.
     pub fn connect(client: Arc<Client>) -> Self {
         let cancel = CancellationToken::new();
-        let (command_tx, mut command_rx) = mpsc::channel(16);
+        let (command_tx, command_rx) = mpsc::channel(16);
         let (market_quote_tx, market_quote_rx) = broadcast::channel(128);
         let (market_bar_tx, market_bar_rx) = broadcast::channel(1024);
         let (market_trade_tx, market_trade_rx) = broadcast::channel(1024);
 
         let cancel_token = cancel.clone();
         tokio::spawn(async move {
-            // Connect to live market data, default to no data but establish the connection
-            let (mut stream, mut subscription) =
-                client.subscribe::<RealtimeData<IEX>>().await.unwrap();
-            info!("Connected to brokerage");
-
-            // TODO: Is data stream is cancellation safe? Appears to be cancel safe though based on apca impl
-            loop {
-                select! {
-                    Some(message_result) = stream.next() => {
-                        match message_result {
-                            Ok(Ok(data)) => {
-                                match data {
-                                    Data::Bar(bar) => {
-                                        if market_bar_tx.receiver_count() > 0 {
-                                            let _ = market_bar_tx.send(bar);
-                                        }
-                                    },
-                                    Data::Quote(quote) => {
-                                        if market_quote_tx.receiver_count() > 0 {
-                                            let _ = market_quote_tx.send(quote);
-                                        }
-                                    },
-                                    Data::Trade(trade) => {
-                                        if market_trade_tx.receiver_count() > 0 {
-                                            let _ = market_trade_tx.send(trade);
-                                        }
-                                    }
-                                    _ => ()
-                                }
-                            },
-                            // TODO: Give more detailed warning log
-                            Ok(Err(_)) => {
-                                warn!("Failed to parse stream message");
-                            },
-                            Err(_) => {
-                                warn!("Encountered error with websocket connection");
-                            },
-                        }
-                    },
-                    Some(command) = command_rx.recv() => {
-                        match command {
-                            Command::Subscribe(data) => {
-                                // Issue control message to data service and await response
-                                let subscribe_future = subscription.subscribe(&data);
-                                pin!(subscribe_future);
-                                let () = drive(subscribe_future, &mut stream)
-                                    .await
-                                    .unwrap()
-                                    .unwrap()
-                                    .unwrap();
-
-                                info!("Successfully updated live market data feed");
-                            },
-                            Command::Unsubscribe(data) => {
-                                // Issue control message to data service and await response
-                                let subscribe_future = subscription.unsubscribe(&data);
-                                pin!(subscribe_future);
-                                let () = drive(subscribe_future, &mut stream)
-                                    .await
-                                    .unwrap()
-                                    .unwrap()
-                                    .unwrap();
-
-                                info!("Successfully updated live market data feed");
-                            }
-                        }
-                    },
-                    _ = cancel_token.cancelled() => {
-                        info!("Disconnecting from live data source");
-                        break;
-                    },
-                }
-            }
+            MarketDataIngestor::init(
+                client,
+                command_rx,
+                market_quote_tx,
+                market_bar_tx,
+                market_trade_tx,
+                cancel_token,
+            )
+            .await
+            .run()
+            .await;
         });
 
         Self {
@@ -291,7 +239,7 @@ impl Service for MarketDataManager {
 
 impl Drop for MarketDataManager {
     fn drop(&mut self) {
-        self.cancel.cancel();
+        self.stop();
     }
 }
 

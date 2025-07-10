@@ -2,6 +2,8 @@ use std::{error::Error, sync::Arc};
 
 use apca::{ApiInfo, Client};
 use log::{debug, error, info};
+use plutonic::core::Plutonic;
+use tokio::signal;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -18,6 +20,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         client.api_info().key_id,
         client.api_info().secret
     );
+
+    Plutonic::run(client);
+
+    signal::ctrl_c().await.expect("Failed to listen for SIGINT.");
 
     Ok(())
 }
