@@ -1,8 +1,8 @@
 use std::{error::Error, sync::Arc};
 
 use apca::{ApiInfo, Client};
-use log::{debug, error, info};
-use plutonic::core::Plutonic;
+use log::{debug, error, info, warn};
+use plutonic::{engine::Plutonic, exchange::AlpacaExchange};
 use tokio::signal;
 
 #[tokio::main]
@@ -21,9 +21,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         client.api_info().secret
     );
 
-    Plutonic::run(client);
+    let exchange = AlpacaExchange::new(client);
 
-    signal::ctrl_c().await.expect("Failed to listen for SIGINT.");
+    let engine = Plutonic::new(exchange);
+
+    engine.start().await;
+
+    let _ = signal::ctrl_c().await.inspect_err(|err| {
+        warn!("Failed to wait for SIGINT. Terminating session. {}", err);
+    });
+
+    info!("Shutting down Plutonic");
 
     Ok(())
 }
