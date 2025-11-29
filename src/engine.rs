@@ -2,6 +2,9 @@ use log::info;
 
 use crate::exchange::AlpacaExchange;
 
+mod context;
+pub use context::*;
+
 pub struct Plutonic {
     exchange: AlpacaExchange,
 }
@@ -18,5 +21,12 @@ impl Plutonic {
 
         // Open connection to the exchange
         self.exchange.connect().await;
+    }
+
+    pub async fn stop(&self) {
+        info!("Shutting down Plutonic");
+
+        // Close Connection
+        self.exchange.disconnect().await;
     }
 }

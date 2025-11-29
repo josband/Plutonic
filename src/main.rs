@@ -2,7 +2,10 @@ use std::{error::Error, sync::Arc};
 
 use apca::{ApiInfo, Client};
 use log::{debug, error, info, warn};
-use plutonic::{engine::Plutonic, exchange::AlpacaExchange};
+use plutonic::{
+    engine::{EngineContext, Plutonic},
+    exchange::AlpacaExchange,
+};
 use tokio::signal;
 
 #[tokio::main]
@@ -14,14 +17,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         error!("Environment is not properly set. Make sure to set both the API key and secret");
     })?;
 
-    let client = Arc::new(Client::new(api_info));
+    let client = Client::new(api_info);
     debug!(
         "Api key: {} Secret: {}",
         client.api_info().key_id,
         client.api_info().secret
     );
 
-    let exchange = AlpacaExchange::new(client);
+    let ctx = EngineContext::new(client);
+
+    let exchange = AlpacaExchange::new(ctx.clone());
 
     let engine = Plutonic::new(exchange);
 
@@ -31,7 +36,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         warn!("Failed to wait for SIGINT. Terminating session. {}", err);
     });
 
-    info!("Shutting down Plutonic");
+    engine.stop().await;
 
     Ok(())
 }

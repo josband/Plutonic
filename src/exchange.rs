@@ -4,10 +4,13 @@ use apca::data::v2::stream::{
 use apca::{Client, Subscribable};
 use futures::StreamExt;
 use log::{error, info, warn};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tokio::select;
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::{CancellationToken, DropGuard};
+
+use crate::engine::EngineContext;
 
 type DataStream = <RealtimeData<IEX> as Subscribable>::Stream;
 type DataSubscription = <RealtimeData<IEX> as Subscribable>::Subscription;
@@ -32,7 +35,7 @@ impl From<Data> for LiveData {
 
 /// Interface to interact with the Alpaca Exchange.
 pub struct AlpacaExchange {
-    client: Arc<Client>,
+    engine_ctx: Arc<EngineContext>,
     sender: Mutex<Option<Sender>>,
     data_tx: broadcast::Sender<LiveData>,
     data_rx: broadcast::Receiver<LiveData>,
@@ -43,11 +46,11 @@ impl AlpacaExchange {
     ///
     /// A live feed of data is <strong>not</strong> opened. See `connect` for
     /// how to open a connection.
-    pub fn new(client: Arc<Client>) -> Self {
+    pub fn new(ctx: Arc<EngineContext>) -> Self {
         let (data_tx, data_rx) = broadcast::channel(2048);
 
         Self {
-            client,
+            engine_ctx: ctx,
             sender: Mutex::new(None),
             data_tx,
             data_rx,
@@ -62,13 +65,19 @@ impl AlpacaExchange {
     pub async fn connect(&self) {
         // Subscribe to realtime data, getting a stream (output) and subscription (control input)
         info!("Opening a connection with Alpaca");
-        let (stream, subscription) = self.client.subscribe::<RealtimeData<IEX>>().await.unwrap();
+        let (stream, subscription) = self
+            .engine_ctx
+            .client
+            .subscribe::<RealtimeData<IEX>>()
+            .await
+            .unwrap();
 
         // TODO: Reader and Sender might not be the best names but OK for now
         // Create a Reader object to control the stream and a Sender responsible for sending messages to the server
         let (tx, rx) = mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
         let connection = Connection {
+            ctx: self.engine_ctx.clone(),
             stream,
             subscription,
             command_rx: rx,
@@ -81,6 +90,7 @@ impl AlpacaExchange {
             _cancel: cancel.drop_guard(),
         };
         self.sender.lock().unwrap().replace(sender);
+        self.engine_ctx.is_running.store(true, Ordering::SeqCst);
 
         // Spawn a task for the reader to continuosly read for data updates to publish into the bot
         tokio::spawn(Self::start(connection));
@@ -123,6 +133,9 @@ impl AlpacaExchange {
                 _ = connection.cancel.cancelled() => break,
             }
         }
+
+        // Connection has terminated if loop exited, update context
+        connection.ctx.is_running.store(false, Ordering::SeqCst);
     }
 
     /// Disconnect from the exchange and close any open data feeds
@@ -162,6 +175,7 @@ struct Sender {
 }
 
 struct Connection {
+    ctx: Arc<EngineContext>,
     stream: DataStream,
     subscription: DataSubscription,
     command_rx: mpsc::UnboundedReceiver<Command>,
