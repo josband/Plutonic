@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc};
+use std::error::Error;
 
 use apca::{ApiInfo, Client};
 use log::{debug, error, info, warn};

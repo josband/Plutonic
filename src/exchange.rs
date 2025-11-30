@@ -1,7 +1,7 @@
 use apca::data::v2::stream::{
     drive, Bar, Data, MarketData, Quote, RealtimeData, SymbolList, Trade, IEX,
 };
-use apca::{Client, Subscribable};
+use apca::Subscribable;
 use futures::StreamExt;
 use log::{error, info, warn};
 use std::sync::atomic::Ordering;
@@ -38,7 +38,6 @@ pub struct AlpacaExchange {
     engine_ctx: Arc<EngineContext>,
     sender: Mutex<Option<Sender>>,
     data_tx: broadcast::Sender<LiveData>,
-    data_rx: broadcast::Receiver<LiveData>,
 }
 
 impl AlpacaExchange {
@@ -47,18 +46,11 @@ impl AlpacaExchange {
     /// A live feed of data is <strong>not</strong> opened. See `connect` for
     /// how to open a connection.
     pub fn new(ctx: Arc<EngineContext>) -> Self {
-        let (data_tx, data_rx) = broadcast::channel(2048);
-
         Self {
+            data_tx: ctx.sender().clone(),
             engine_ctx: ctx,
             sender: Mutex::new(None),
-            data_tx,
-            data_rx,
         }
-    }
-
-    pub fn data_receiver(&self) -> broadcast::Receiver<LiveData> {
-        self.data_rx.resubscribe()
     }
 
     /// Connect to the exchange and start listening to live data feeds.
