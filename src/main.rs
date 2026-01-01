@@ -1,15 +1,10 @@
-use std::error::Error;
-
 use apca::{ApiInfo, Client};
 use log::{debug, error, info, warn};
-use plutonic::{
-    engine::{EngineContext, Plutonic},
-    exchange::AlpacaExchange,
-};
+use plutonic::engine::{EngineContext, Plutonic};
 use tokio::signal;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_environment();
 
     info!("Connecting to Alpaca API");
@@ -26,9 +21,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let ctx = EngineContext::new(client);
 
-    let exchange = AlpacaExchange::new(ctx.clone());
-
-    let engine = Plutonic::new(exchange);
+    let engine = Plutonic::new(ctx);
 
     engine.start().await;
 

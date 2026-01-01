@@ -15,7 +15,7 @@ use crate::engine::EngineContext;
 type DataStream = <RealtimeData<IEX> as Subscribable>::Stream;
 type DataSubscription = <RealtimeData<IEX> as Subscribable>::Subscription;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum LiveData<B = Bar, Q = Quote, T = Trade> {
     Bar(B),
     Quote(Q),

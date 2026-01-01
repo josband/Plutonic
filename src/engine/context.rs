@@ -1,9 +1,10 @@
 use std::sync::{atomic::AtomicBool, Arc};
 
 use apca::Client;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
+use tokio_util::sync::CancellationToken;
 
-use crate::exchange::LiveData;
+use crate::{engine::Signal, exchange::LiveData};
 
 const LIVE_DATA_CHANNEL_SIZE: usize = 2048;
 
@@ -14,20 +15,29 @@ const LIVE_DATA_CHANNEL_SIZE: usize = 2048;
 pub struct EngineContext {
     pub is_running: AtomicBool,
     pub client: Client,
+    cancel_token: CancellationToken,
+
+    // TODO: Figure out a way to move these
     live_tx: broadcast::Sender<LiveData>,
     live_rx: broadcast::Receiver<LiveData>,
+    pub order_tx: mpsc::Sender<Signal>,
+    pub order_rx: mpsc::Receiver<Signal>,
 }
 
 impl EngineContext {
     // TODO: Initialize from a set of settings passed
     pub fn new(client: Client) -> Arc<Self> {
-        let (tx, rx) = broadcast::channel(LIVE_DATA_CHANNEL_SIZE);
+        let (live_tx, live_rx) = broadcast::channel(LIVE_DATA_CHANNEL_SIZE);
+        let (order_tx, order_rx) = mpsc::channel(64);
 
         Arc::new(Self {
             is_running: AtomicBool::new(false),
             client,
-            live_tx: tx,
-            live_rx: rx,
+            cancel_token: CancellationToken::new(),
+            live_tx,
+            live_rx,
+            order_tx,
+            order_rx,
         })
     }
 
@@ -37,5 +47,9 @@ impl EngineContext {
 
     pub fn receiver(&self) -> broadcast::Receiver<LiveData> {
         self.live_rx.resubscribe()
+    }
+
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel_token.clone()
     }
 }
