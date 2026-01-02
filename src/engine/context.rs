@@ -14,7 +14,7 @@ const LIVE_DATA_CHANNEL_SIZE: usize = 2048;
 /// aware of common immutable objects such as the exchange client
 pub struct EngineContext {
     pub is_running: AtomicBool,
-    pub client: Client,
+    pub client: Arc<Client>,
     cancel_token: CancellationToken,
 
     // TODO: Figure out a way to move these
@@ -29,7 +29,7 @@ impl EngineContext {
 
         Arc::new(Self {
             is_running: AtomicBool::new(false),
-            client,
+            client: Arc::new(client),
             cancel_token: CancellationToken::new(),
             live_tx,
             live_rx,

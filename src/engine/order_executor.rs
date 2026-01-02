@@ -1,26 +1,26 @@
 use std::sync::Arc;
 
-use apca::api::v2::order::{self, Amount, Class, CreateReqInit, Side};
-use num_decimal::Num;
+use apca::{
+    api::v2::order::{self, Amount, Class, CreateReqInit, Side, Type},
+    Client,
+};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::{EngineContext, Signal, SignalType};
 
 pub struct OrderExecutor {
-    ctx: Arc<EngineContext>,
+    client: Arc<Client>,
     order_rx: mpsc::Receiver<Signal>,
     cancel: CancellationToken,
 }
 
 impl OrderExecutor {
     pub fn new(ctx: Arc<EngineContext>, order_rx: mpsc::Receiver<Signal>) -> Self {
-        let cancel = ctx.cancel_token().clone();
-
         Self {
-            ctx,
+            client: ctx.client.clone(),
             order_rx,
-            cancel,
+            cancel: ctx.cancel_token().clone(),
         }
     }
 
@@ -50,12 +50,7 @@ impl OrderExecutor {
                 _ => continue,
             };
 
-            let order = self
-                .ctx
-                .client
-                .issue::<order::Create>(&order)
-                .await
-                .unwrap();
+            let _order = self.client.issue::<order::Create>(&order).await.unwrap();
         }
     }
 }
