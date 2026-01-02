@@ -94,8 +94,8 @@ impl AlpacaExchange {
             select! {
                 Some(command) = connection.command_rx.recv() => {
                     match command {
-                        Command::Subscribe(symbols) => connection.subscribe(symbols).await,
-                        Command::Unsubscribe(symbols) => connection.unsubscribe(symbols).await,
+                        ExchangeCommand::Subscribe(symbols) => connection.subscribe(symbols).await,
+                        ExchangeCommand::Unsubscribe(symbols) => connection.unsubscribe(symbols).await,
                     };
                 },
                 websocket_response = connection.stream.next() => {
@@ -138,7 +138,7 @@ impl AlpacaExchange {
     pub fn subscribe(&self, symbols: SymbolList) {
         let mut guard = self.sender.lock().unwrap();
         if let Some(ref sender) = *guard {
-            if sender.tx.send(Command::Subscribe(symbols)).is_err() {
+            if sender.tx.send(ExchangeCommand::Subscribe(symbols)).is_err() {
                 warn!("Websocket connection was closed.");
                 guard.take();
             }
@@ -148,7 +148,11 @@ impl AlpacaExchange {
     pub fn unsubscribe(&self, symbols: SymbolList) {
         let mut guard = self.sender.lock().unwrap();
         if let Some(ref sender) = *guard {
-            if sender.tx.send(Command::Unsubscribe(symbols)).is_err() {
+            if sender
+                .tx
+                .send(ExchangeCommand::Unsubscribe(symbols))
+                .is_err()
+            {
                 warn!("Websocket connection was closed.");
                 guard.take();
             }
@@ -156,13 +160,13 @@ impl AlpacaExchange {
     }
 }
 
-enum Command {
+enum ExchangeCommand {
     Subscribe(SymbolList),
     Unsubscribe(SymbolList),
 }
 
 struct Sender {
-    tx: mpsc::UnboundedSender<Command>,
+    tx: mpsc::UnboundedSender<ExchangeCommand>,
     _cancel: DropGuard,
 }
 
@@ -170,7 +174,7 @@ struct Connection {
     ctx: Arc<EngineContext>,
     stream: DataStream,
     subscription: DataSubscription,
-    command_rx: mpsc::UnboundedReceiver<Command>,
+    command_rx: mpsc::UnboundedReceiver<ExchangeCommand>,
     data_tx: broadcast::Sender<LiveData>,
     cancel: CancellationToken,
 }

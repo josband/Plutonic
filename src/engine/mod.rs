@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use log::info;
+use tokio::sync::mpsc;
 
 use crate::exchange::{AlpacaExchange, LiveData};
 
@@ -9,6 +10,9 @@ pub use context::*;
 
 mod strategy;
 pub use strategy::*;
+
+mod order_executor;
+pub use order_executor::*;
 
 pub struct Plutonic {
     ctx: Arc<EngineContext>,
@@ -39,14 +43,18 @@ impl Plutonic {
 
         // Open connection to the exchange
         self.exchange.connect().await;
-        let mut processor = StrategyExecutor::new(self.ctx.clone(), DummyStrategy);
 
+        let (order_tx, order_rx) = mpsc::channel(64);
+        let mut processor = StrategyExecutor::new(self.ctx.clone(), order_tx, DummyStrategy);
         tokio::spawn(async move {
             processor.start().await;
         });
+
+        let order_executor = OrderExecutor::new(self.ctx.clone(), order_rx);
+        tokio::spawn(order_executor.start());
     }
 
-    pub async fn stop(&self) {
+    pub async fn shutdown(&self) {
         info!("Shutting down Plutonic");
 
         // Close Connection

@@ -60,12 +60,12 @@ pub struct StrategyExecutor<S: Strategy> {
 }
 
 impl<S: Strategy> StrategyExecutor<S> {
-    pub fn new(ctx: Arc<EngineContext>, strategy: S) -> Self {
+    pub fn new(ctx: Arc<EngineContext>, order_tx: mpsc::Sender<Signal>, strategy: S) -> Self {
         // TODO: Use parsed settings for initial strategies but init it with a basic strategy
 
         StrategyExecutor {
             exchange_rx: ctx.receiver(),
-            order_tx: ctx.order_tx.clone(),
+            order_tx,
             strategy,
             cancel: ctx.cancel_token(),
         }

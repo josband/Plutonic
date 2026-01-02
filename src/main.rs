@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         warn!("Failed to wait for SIGINT. Terminating session. {}", err);
     });
 
-    engine.stop().await;
+    engine.shutdown().await;
 
     Ok(())
 }
