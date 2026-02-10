@@ -1,63 +1,80 @@
-use std::sync::Arc;
-
-use log::info;
-use tokio::sync::mpsc;
-
-use crate::exchange::{AlpacaExchange, LiveData};
+#![allow(unused)]
 
 mod context;
-pub use context::*;
-
+mod portfolio;
 mod strategy;
+
+use apca::api::v2::order::Order;
+pub use context::*;
+use log::info;
+pub use portfolio::*;
 pub use strategy::*;
+use tokio::sync::mpsc;
 
-mod order_executor;
-pub use order_executor::*;
+use std::sync::Arc;
 
-pub struct Plutonic {
+use crate::broker::LiveData;
+
+pub struct TradingEngine<S: Strategy> {
     ctx: Arc<EngineContext>,
-    exchange: AlpacaExchange,
+    strategy_executor: StrategyExecutor<S>,
+    portfolio: Portfolio,
 }
 
-struct DummyStrategy;
+impl<S: Strategy> TradingEngine<S> {
+    pub fn new(
+        ctx: EngineContext,
+        strategy: S,
+        data_rx: mpsc::UnboundedReceiver<LiveData>,
+        order_tx: mpsc::Sender<Order>,
+    ) -> Self {
+        let ctx = Arc::new(ctx);
+        let strategy_executor = StrategyExecutor::new(strategy);
+        let portfolio = Portfolio {};
 
-impl Strategy for DummyStrategy {
-    fn process(&self, _data: &LiveData) -> Signal {
-        dbg!("Process called");
-        Signal {
-            signal_type: SignalType::Hold,
-            symbol: String::new(),
+        Self {
+            ctx,
+            strategy_executor,
+            portfolio,
         }
+    }
+
+    /// Spawns a task coordinating the trading engine.
+    ///
+    /// [TradingEngine] provides the interface for evaluating core trading logic. It does not
+    /// spawn a task coordinating the trading engine in an event driven manner. Instead, `spawn`
+    /// consumes the trading engine and spawns the coordinator task. A [TradingEngineHandle] is returned
+    /// which can be used to issue commands to the engine task.
+    pub fn spawn(self) -> TradingEngineHandle {
+        let (command_tx, command_rx) = mpsc::channel(64);
+
+        tokio::spawn(async move {
+            // TODO: Implement trading engine coordinator task
+        });
+
+        TradingEngineHandle::new(command_tx)
     }
 }
 
-impl Plutonic {
-    pub fn new(ctx: Arc<EngineContext>) -> Self {
-        let exchange = AlpacaExchange::new(ctx.clone());
+enum TradingEngineCommand {
+    Start,
+    Stop,
+}
 
-        Self { ctx, exchange }
+pub struct TradingEngineHandle {
+    command_tx: mpsc::Sender<TradingEngineCommand>,
+}
+
+impl TradingEngineHandle {
+    fn new(command_tx: mpsc::Sender<TradingEngineCommand>) -> Self {
+        Self { command_tx }
     }
 
     pub async fn start(&self) {
-        info!("Starting Plutonic Engine");
-
-        // Open connection to the exchange
-        self.exchange.connect().await;
-
-        let (order_tx, order_rx) = mpsc::channel(64);
-        let mut processor = StrategyExecutor::new(self.ctx.clone(), order_tx, DummyStrategy);
-        tokio::spawn(async move {
-            processor.start().await;
-        });
-
-        let order_executor = OrderExecutor::new(self.ctx.clone(), order_rx);
-        tokio::spawn(order_executor.start());
+        let _ = self.command_tx.send(TradingEngineCommand::Start).await;
     }
 
-    pub async fn shutdown(&self) {
-        info!("Shutting down Plutonic");
-
-        // Close Connection
-        self.exchange.disconnect().await;
+    pub async fn stop(&self) {
+        let _ = self.command_tx.send(TradingEngineCommand::Stop).await;
     }
 }

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 apca = "0.30.0"
 async-trait = "0.1.88"
+dashmap = "6.1.0"
 dotenv = "0.15.0"
 futures = "0.3.31"
 log = "0.4.27"

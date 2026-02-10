@@ -1,16 +1,12 @@
 use apca::data::v2::stream::{
     drive, Bar, Data, MarketData, Quote, RealtimeData, SymbolList, Trade, IEX,
 };
-use apca::Subscribable;
+use apca::{Client, Subscribable};
 use futures::StreamExt;
 use log::{error, info, warn};
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use tokio::select;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tokio_util::sync::{CancellationToken, DropGuard};
-
-use crate::engine::EngineContext;
 
 type DataStream = <RealtimeData<IEX> as Subscribable>::Stream;
 type DataSubscription = <RealtimeData<IEX> as Subscribable>::Subscription;
@@ -33,23 +29,28 @@ impl From<Data> for LiveData {
     }
 }
 
-/// Interface to interact with the Alpaca Exchange.
-pub struct AlpacaExchange {
-    engine_ctx: Arc<EngineContext>,
+/// Broker for listening to live data feeds.
+///
+/// The broker is the main entity responsible for interacting with an Exchange to
+/// execute orders and get pricing for securities. This struct should only be used
+/// as an I/O structure. It simply connects to the exchange and pushes data into our system.
+pub struct AlpacaBroker {
+    client: Arc<Client>,
     sender: Mutex<Option<Sender>>,
-    data_tx: broadcast::Sender<LiveData>,
+    data_tx: mpsc::UnboundedSender<LiveData>,
 }
 
-impl AlpacaExchange {
+impl AlpacaBroker {
+    #[allow(unused)]
     /// Constructs a new instance of an Alpaca Exchange.
     ///
     /// A live feed of data is <strong>not</strong> opened. See `connect` for
     /// how to open a connection.
-    pub fn new(ctx: Arc<EngineContext>) -> Self {
+    pub fn new(client: Arc<Client>, data_tx: mpsc::UnboundedSender<LiveData>) -> Self {
         Self {
-            data_tx: ctx.sender().clone(),
-            engine_ctx: ctx,
+            client,
             sender: Mutex::new(None),
+            data_tx,
         }
     }
 
@@ -57,19 +58,13 @@ impl AlpacaExchange {
     pub async fn connect(&self) {
         // Subscribe to realtime data, getting a stream (output) and subscription (control input)
         info!("Opening a connection with Alpaca");
-        let (stream, subscription) = self
-            .engine_ctx
-            .client
-            .subscribe::<RealtimeData<IEX>>()
-            .await
-            .unwrap();
+        let (stream, subscription) = self.client.subscribe::<RealtimeData<IEX>>().await.unwrap();
 
         // TODO: Reader and Sender might not be the best names but OK for now
         // Create a Reader object to control the stream and a Sender responsible for sending messages to the server
         let (tx, rx) = mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
-        let connection = Connection {
-            ctx: self.engine_ctx.clone(),
+        let connection = BrokerConnection {
             stream,
             subscription,
             command_rx: rx,
@@ -82,20 +77,19 @@ impl AlpacaExchange {
             _cancel: cancel.drop_guard(),
         };
         self.sender.lock().unwrap().replace(sender);
-        self.engine_ctx.is_running.store(true, Ordering::SeqCst);
 
         // Spawn a task for the reader to continuosly read for data updates to publish into the bot
         tokio::spawn(Self::start(connection));
     }
 
-    // TODO: Pass a weak reference to the exchange which can be used to remove the reader on disconnect/call an on disconnect event
-    async fn start(mut connection: Connection) {
+    async fn start(mut connection: BrokerConnection) {
+        // TODO: Pass a weak reference to the exchange which can be used to remove the reader on disconnect/call an on disconnect event
         loop {
-            select! {
+            tokio::select! {
                 Some(command) = connection.command_rx.recv() => {
                     match command {
-                        ExchangeCommand::Subscribe(symbols) => connection.subscribe(symbols).await,
-                        ExchangeCommand::Unsubscribe(symbols) => connection.unsubscribe(symbols).await,
+                        BrokerCommand::Subscribe(symbols) => connection.subscribe(symbols).await,
+                        BrokerCommand::Unsubscribe(symbols) => connection.unsubscribe(symbols).await,
                     };
                 },
                 websocket_response = connection.stream.next() => {
@@ -125,9 +119,6 @@ impl AlpacaExchange {
                 _ = connection.cancel.cancelled() => break,
             }
         }
-
-        // Connection has terminated if loop exited, update context
-        connection.ctx.is_running.store(false, Ordering::SeqCst);
     }
 
     /// Disconnect from the exchange and close any open data feeds
@@ -138,7 +129,7 @@ impl AlpacaExchange {
     pub fn subscribe(&self, symbols: SymbolList) {
         let mut guard = self.sender.lock().unwrap();
         if let Some(ref sender) = *guard {
-            if sender.tx.send(ExchangeCommand::Subscribe(symbols)).is_err() {
+            if sender.tx.send(BrokerCommand::Subscribe(symbols)).is_err() {
                 warn!("Websocket connection was closed.");
                 guard.take();
             }
@@ -148,11 +139,7 @@ impl AlpacaExchange {
     pub fn unsubscribe(&self, symbols: SymbolList) {
         let mut guard = self.sender.lock().unwrap();
         if let Some(ref sender) = *guard {
-            if sender
-                .tx
-                .send(ExchangeCommand::Unsubscribe(symbols))
-                .is_err()
-            {
+            if sender.tx.send(BrokerCommand::Unsubscribe(symbols)).is_err() {
                 warn!("Websocket connection was closed.");
                 guard.take();
             }
@@ -160,26 +147,25 @@ impl AlpacaExchange {
     }
 }
 
-enum ExchangeCommand {
+enum BrokerCommand {
     Subscribe(SymbolList),
     Unsubscribe(SymbolList),
 }
 
 struct Sender {
-    tx: mpsc::UnboundedSender<ExchangeCommand>,
+    tx: mpsc::UnboundedSender<BrokerCommand>,
     _cancel: DropGuard,
 }
 
-struct Connection {
-    ctx: Arc<EngineContext>,
+struct BrokerConnection {
     stream: DataStream,
     subscription: DataSubscription,
-    command_rx: mpsc::UnboundedReceiver<ExchangeCommand>,
-    data_tx: broadcast::Sender<LiveData>,
+    command_rx: mpsc::UnboundedReceiver<BrokerCommand>,
+    data_tx: mpsc::UnboundedSender<LiveData>,
     cancel: CancellationToken,
 }
 
-impl Connection {
+impl BrokerConnection {
     async fn subscribe(&mut self, symbols: SymbolList) {
         let mut data = MarketData::default();
         data.set_bars(symbols.clone());

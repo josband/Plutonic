@@ -1,13 +1,10 @@
-use std::sync::Arc;
+use crate::broker::LiveData;
 
-use log::{error, info};
-use tokio::sync::{
-    broadcast::{self, error::RecvError},
-    mpsc,
-};
-use tokio_util::sync::CancellationToken;
-
-use crate::{engine::EngineContext, exchange::LiveData};
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signal {
+    pub symbol: String,
+    pub signal_type: SignalType,
+}
 
 /// Trading Signal.
 ///
@@ -18,12 +15,6 @@ pub enum SignalType {
     Buy,
     Hold,
     Sell,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Signal {
-    pub symbol: String,
-    pub signal_type: SignalType,
 }
 
 /// Trait encapsulating the core logic of a trading strategy.
@@ -53,52 +44,53 @@ pub trait Indicator {
 ///
 /// The data processor should ingest live data as it comes in, calculate indicators needed for a strategy
 pub struct StrategyExecutor<S: Strategy> {
-    exchange_rx: broadcast::Receiver<LiveData>,
-    order_tx: mpsc::Sender<Signal>,
     strategy: S,
-    cancel: CancellationToken,
+    // exchange_rx: broadcast::Receiver<LiveData>,
+    // order_tx: mpsc::Sender<Signal>,
+    // cancel: CancellationToken,
 }
 
 impl<S: Strategy> StrategyExecutor<S> {
-    pub fn new(ctx: Arc<EngineContext>, order_tx: mpsc::Sender<Signal>, strategy: S) -> Self {
+    pub fn new(
+        strategy: S, /*ctx: Arc<EngineContext>, order_tx: mpsc::Sender<Signal>, strategy: S*/
+    ) -> Self {
         // TODO: Use parsed settings for initial strategies but init it with a basic strategy
-
         StrategyExecutor {
-            exchange_rx: ctx.receiver(),
-            order_tx,
             strategy,
-            cancel: ctx.cancel_token(),
+            // exchange_rx: ctx.receiver(),
+            // order_tx,
+            // cancel: ctx.cancel_token(),
         }
     }
 
-    pub async fn start(&mut self) {
-        info!("Starting StrategyExecutor");
-        loop {
-            tokio::select! {
-                exchange_event = self.exchange_rx.recv() => {
-                    self.on_exchange_event(exchange_event).await;
-                }
-                _ = self.cancel.cancelled() => {
-                    break;
-                }
-            }
-        }
+    // pub async fn start(&mut self) {
+    //     info!("Starting StrategyExecutor");
+    //     loop {
+    //         tokio::select! {
+    //             exchange_event = self.exchange_rx.recv() => {
+    //                 self.on_exchange_event(exchange_event).await;
+    //             }
+    //             _ = self.cancel.cancelled() => {
+    //                 break;
+    //             }
+    //         }
+    //     }
 
-        info!("StrategyExecutor exited successfully.");
-    }
+    //     info!("StrategyExecutor exited successfully.");
+    // }
 
-    async fn on_exchange_event(&mut self, event: Result<LiveData, RecvError>) {
-        match event {
-            Ok(data) => {
-                info!("Received Live Data: {:?}", data);
-                let signal = self.strategy.process(&data);
-                if signal.signal_type != SignalType::Hold {
-                    let _ = self.order_tx.send(signal).await;
-                }
-            }
-            Err(err) => {
-                error!("{}", err);
-            }
-        };
-    }
+    // async fn on_exchange_event(&mut self, event: Result<LiveData, RecvError>) {
+    //     match event {
+    //         Ok(data) => {
+    //             info!("Received Live Data: {:?}", data);
+    //             let signal = self.strategy.process(&data);
+    //             if signal.signal_type != SignalType::Hold {
+    //                 let _ = self.order_tx.send(signal).await;
+    //             }
+    //         }
+    //         Err(err) => {
+    //             error!("{}", err);
+    //         }
+    //     };
+    // }
 }

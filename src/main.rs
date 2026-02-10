@@ -1,6 +1,6 @@
 use apca::{ApiInfo, Client};
 use log::{debug, error, info, warn};
-use plutonic::engine::{EngineContext, Plutonic};
+use plutonic::{bot::Settings, Plutonic};
 use tokio::signal;
 
 #[tokio::main]
@@ -19,17 +19,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         client.api_info().secret
     );
 
-    let ctx = EngineContext::new(client);
+    let plutonic = Plutonic::new(client, Settings {});
 
-    let engine = Plutonic::new(ctx);
-
-    engine.start().await;
+    plutonic.start().await;
 
     let _ = signal::ctrl_c().await.inspect_err(|err| {
         warn!("Failed to wait for SIGINT. Terminating session. {}", err);
     });
-
-    engine.shutdown().await;
 
     Ok(())
 }
