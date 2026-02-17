@@ -1,37 +1,63 @@
+use std::sync::Arc;
+
 use apca::{ApiInfo, Client};
-use log::{debug, error, info, warn};
-use plutonic::{bot::Settings, Plutonic};
-use tokio::signal;
+use log::{debug, error, info};
+use plutonic::{
+    broker::AlpacaBroker,
+    engine::{EngineContext, TradingEngine},
+    order_executor::OrderExecutor,
+};
+use tracing_subscriber::filter::LevelFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_environment();
 
-    info!("Connecting to Alpaca API");
+    info!("Building Alpaca API Information");
     let api_info = ApiInfo::from_env().inspect_err(|_| {
         error!("Environment is not properly set. Make sure to set both the API key and secret");
     })?;
 
-    let client = Client::new(api_info);
+    let client = Arc::new(Client::new(api_info));
     debug!(
         "Api key: {} Secret: {}",
         client.api_info().key_id,
         client.api_info().secret
     );
 
-    let plutonic = Plutonic::new(client, Settings {});
+    info!("Starting Plutonic");
 
-    plutonic.start().await;
+    // **************************** REMOVE ****************************
+    let mut order_executor = OrderExecutor::new(client.clone()).await;
+    let mut broker = AlpacaBroker::connect(client.clone()).await;
+    let _ = TradingEngine::new(EngineContext::new(client));
+    broker.subscribe("AAPL").await;
+    loop {
+        tokio::select! {
+            Some(data) = broker.next() => {
+                info!("Received market data {:?}", data);
+            },
+            Some(data) = order_executor.next_order_update() => {
+                info!("Received order update {:?}", data);
+            },
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received Ctrl+C signal");
+                break;
+            }
+        }
+    }
+    // ****************************************************************
 
-    let _ = signal::ctrl_c().await.inspect_err(|err| {
-        warn!("Failed to wait for SIGINT. Terminating session. {}", err);
-    });
+    info!("Exiting Plutonic");
 
     Ok(())
 }
 
 fn init_environment() {
-    simple_logger::init_with_level(log::Level::Debug).ok();
     dotenv::dotenv().ok();
-    info!("Initializing logging and environment");
+    tracing_subscriber::fmt()
+        .with_max_level(LevelFilter::DEBUG)
+        .init();
+
+    info!("Initialized logging and environment");
 }

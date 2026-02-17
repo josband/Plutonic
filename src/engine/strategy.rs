@@ -1,4 +1,4 @@
-use crate::broker::LiveData;
+use crate::broker::data::BrokerData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signal {
@@ -13,7 +13,7 @@ pub struct Signal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignalType {
     Buy,
-    Hold,
+    Neutral,
     Sell,
 }
 
@@ -22,7 +22,7 @@ pub trait Strategy {
     /// Process a market update.
     ///
     /// This method should be implemented by concrete strategy implementations to process incoming market data and generate trading signals.
-    fn process(&self, data: &LiveData) -> Signal;
+    fn process(&self, data: &BrokerData) -> Signal;
 }
 
 /// A metric relating to an asset.
@@ -45,52 +45,15 @@ pub trait Indicator {
 /// The data processor should ingest live data as it comes in, calculate indicators needed for a strategy
 pub struct StrategyExecutor<S: Strategy> {
     strategy: S,
-    // exchange_rx: broadcast::Receiver<LiveData>,
-    // order_tx: mpsc::Sender<Signal>,
-    // cancel: CancellationToken,
 }
 
 impl<S: Strategy> StrategyExecutor<S> {
-    pub fn new(
-        strategy: S, /*ctx: Arc<EngineContext>, order_tx: mpsc::Sender<Signal>, strategy: S*/
-    ) -> Self {
-        // TODO: Use parsed settings for initial strategies but init it with a basic strategy
-        StrategyExecutor {
-            strategy,
-            // exchange_rx: ctx.receiver(),
-            // order_tx,
-            // cancel: ctx.cancel_token(),
-        }
+    pub fn new(strategy: S) -> Self {
+        StrategyExecutor { strategy }
     }
 
-    // pub async fn start(&mut self) {
-    //     info!("Starting StrategyExecutor");
-    //     loop {
-    //         tokio::select! {
-    //             exchange_event = self.exchange_rx.recv() => {
-    //                 self.on_exchange_event(exchange_event).await;
-    //             }
-    //             _ = self.cancel.cancelled() => {
-    //                 break;
-    //             }
-    //         }
-    //     }
-
-    //     info!("StrategyExecutor exited successfully.");
-    // }
-
-    // async fn on_exchange_event(&mut self, event: Result<LiveData, RecvError>) {
-    //     match event {
-    //         Ok(data) => {
-    //             info!("Received Live Data: {:?}", data);
-    //             let signal = self.strategy.process(&data);
-    //             if signal.signal_type != SignalType::Hold {
-    //                 let _ = self.order_tx.send(signal).await;
-    //             }
-    //         }
-    //         Err(err) => {
-    //             error!("{}", err);
-    //         }
-    //     };
-    // }
+    pub async fn evaluate_strategies(&self, data: BrokerData) -> Signal {
+        // Will become more complex as the executor evolves to handle multiple strategies and indicators
+        self.strategy.process(&data)
+    }
 }

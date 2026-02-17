@@ -2,79 +2,79 @@
 
 mod context;
 mod portfolio;
+mod risk_manager;
 mod strategy;
 
-use apca::api::v2::order::Order;
 pub use context::*;
-use log::info;
 pub use portfolio::*;
 pub use strategy::*;
-use tokio::sync::mpsc;
 
 use std::sync::Arc;
 
-use crate::broker::LiveData;
+use crate::{broker::data::BrokerData, engine::risk_manager::RiskManager};
+use apca::{
+    api::v2::{order::Order, updates::OrderUpdate},
+    data::v2::stream::MarketData,
+};
+use log::info;
+use tokio::sync::mpsc;
 
-pub struct TradingEngine<S: Strategy> {
+pub struct TradingEngine {
     ctx: Arc<EngineContext>,
-    strategy_executor: StrategyExecutor<S>,
+    strategy_executor: StrategyExecutor<DummyStrategy>,
+    risk_manager: RiskManager,
     portfolio: Portfolio,
 }
 
-impl<S: Strategy> TradingEngine<S> {
-    pub fn new(
-        ctx: EngineContext,
-        strategy: S,
-        data_rx: mpsc::UnboundedReceiver<LiveData>,
-        order_tx: mpsc::Sender<Order>,
-    ) -> Self {
+impl TradingEngine {
+    pub fn new(ctx: EngineContext) -> Self {
         let ctx = Arc::new(ctx);
-        let strategy_executor = StrategyExecutor::new(strategy);
+        let strategy_executor = StrategyExecutor::new(DummyStrategy);
         let portfolio = Portfolio {};
+        let risk_manager = RiskManager {};
 
         Self {
             ctx,
             strategy_executor,
+            risk_manager,
             portfolio,
         }
     }
 
-    /// Spawns a task coordinating the trading engine.
-    ///
-    /// [TradingEngine] provides the interface for evaluating core trading logic. It does not
-    /// spawn a task coordinating the trading engine in an event driven manner. Instead, `spawn`
-    /// consumes the trading engine and spawns the coordinator task. A [TradingEngineHandle] is returned
-    /// which can be used to issue commands to the engine task.
-    pub fn spawn(self) -> TradingEngineHandle {
-        let (command_tx, command_rx) = mpsc::channel(64);
+    pub async fn on_market_data(&self, data: BrokerData) -> Option<Order> {
+        let signal = self.strategy_executor.evaluate_strategies(data).await;
+        if signal.signal_type == SignalType::Neutral {
+            return None;
+        }
 
-        tokio::spawn(async move {
-            // TODO: Implement trading engine coordinator task
-        });
+        todo!("Need to evaluate risk against the portfolio")
 
-        TradingEngineHandle::new(command_tx)
+        // Check if the signal adheres to risk strategies
+        //
+        // If passes, generate an order adhering to risk strategies
+    }
+
+    pub async fn on_order_update(&self, order_update: OrderUpdate) {
+        todo!("Must update internal state with order details")
+
+        // Update portfolio with new order details
+    }
+
+    pub async fn synchronize(&self) {
+        // Synchronize portfolio with broker data. Ensures portfolio data matches the account
     }
 }
 
-enum TradingEngineCommand {
-    Start,
-    Stop,
-}
+// *********************** REMOVE **************************************
+struct DummyStrategy;
 
-pub struct TradingEngineHandle {
-    command_tx: mpsc::Sender<TradingEngineCommand>,
-}
-
-impl TradingEngineHandle {
-    fn new(command_tx: mpsc::Sender<TradingEngineCommand>) -> Self {
-        Self { command_tx }
-    }
-
-    pub async fn start(&self) {
-        let _ = self.command_tx.send(TradingEngineCommand::Start).await;
-    }
-
-    pub async fn stop(&self) {
-        let _ = self.command_tx.send(TradingEngineCommand::Stop).await;
+impl Strategy for DummyStrategy {
+    fn process(&self, _data: &BrokerData) -> Signal {
+        dbg!("Process called");
+        Signal {
+            signal_type: SignalType::Neutral,
+            symbol: String::new(),
+        }
     }
 }
+// *********************************************************************
