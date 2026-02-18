@@ -1,54 +1,115 @@
 use std::sync::Arc;
 
 use apca::{ApiInfo, Client};
-use log::{debug, error, info};
 use plutonic::{
     broker::AlpacaBroker,
     engine::{EngineContext, TradingEngine},
     order_executor::OrderExecutor,
 };
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+use tracing::{event, Level};
 use tracing_subscriber::filter::LevelFilter;
 
 #[tokio::main]
+#[allow(unused)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_environment();
 
-    info!("Building Alpaca API Information");
+    event!(Level::INFO, "Building Alpaca API Information");
     let api_info = ApiInfo::from_env().inspect_err(|_| {
-        error!("Environment is not properly set. Make sure to set both the API key and secret");
+        event!(
+            Level::ERROR,
+            "Environment is not properly set. Make sure to set both the API key and secret"
+        );
     })?;
 
     let client = Arc::new(Client::new(api_info));
-    debug!(
+    event!(
+        Level::DEBUG,
         "Api key: {} Secret: {}",
         client.api_info().key_id,
         client.api_info().secret
     );
 
-    info!("Starting Plutonic");
+    event!(Level::INFO, "Starting Plutonic");
 
-    // **************************** REMOVE ****************************
-    let mut order_executor = OrderExecutor::new(client.clone()).await;
-    let mut broker = AlpacaBroker::connect(client.clone()).await;
-    let _ = TradingEngine::new(EngineContext::new(client));
-    broker.subscribe("AAPL").await;
-    loop {
-        tokio::select! {
-            Some(data) = broker.next() => {
-                info!("Received market data {:?}", data);
-            },
-            Some(data) = order_executor.next_order_update() => {
-                info!("Received order update {:?}", data);
-            },
-            _ = tokio::signal::ctrl_c() => {
-                info!("Received Ctrl+C signal");
-                break;
+    let cancel = CancellationToken::new();
+
+    // Start broker task
+    let (data_tx, mut data_rx) = mpsc::unbounded_channel();
+    let broker_cancel = cancel.clone();
+    let broker_client = client.clone();
+    tokio::spawn(async move {
+        let mut broker = AlpacaBroker::connect(broker_client).await;
+        broker.subscribe("AAPL").await;
+        loop {
+            tokio::select! {
+                data_opt = broker.next_market_update() => {
+                    if let Some(data) = data_opt {
+                        let _ = data_tx.send(data);
+                    }
+                    else {
+                        event!(Level::WARN, "WebSocket connection closed. Terminating broker connection.");
+                        break;
+                    }
+                }
+                _ = broker_cancel.cancelled() => {
+                    break;
+                }
             }
         }
-    }
-    // ****************************************************************
+    });
 
-    info!("Exiting Plutonic");
+    // Start order executor task
+    // let (order_tx, mut order_rx) = mpsc::unbounded_channel();
+    let (order_update_tx, mut order_update_rx) = mpsc::unbounded_channel();
+    let order_cancel = cancel.clone();
+    let order_client = client.clone();
+    tokio::spawn(async move {
+        let mut order_executor = OrderExecutor::new(order_client).await;
+        loop {
+            tokio::select! {
+                message = order_executor.next_order_update() => {
+                    if let Some(data) = message {
+                        let _ = order_update_tx.send(data);
+                    }
+                    else {
+                        event!(Level::WARN, "WebSocket connection closed. Terminating order executor connection.");
+                        break;
+                    }
+                }
+                // _ = order_rx.recv() => {
+                // }
+                _ = order_cancel.cancelled() => {
+                    break;
+                }
+            }
+        }
+    });
+
+    // Start engine task
+    tokio::spawn(async move {
+        let ctx = EngineContext::new(client);
+        let engine = TradingEngine::new(ctx);
+        loop {
+            tokio::select! {
+                _ = data_rx.recv() => {
+                    event!(Level::INFO, "Market Update Received");
+                }
+                _ = order_update_rx.recv() => {
+                    event!(Level::INFO, "Order Update Received");
+                }
+            }
+        }
+    });
+
+    if let Err(e) = tokio::signal::ctrl_c().await {
+        event!(Level::ERROR, "Failed to wait for Ctrl-C. {}", e);
+    }
+
+    event!(Level::INFO, "Exiting Plutonic");
+    cancel.cancel();
 
     Ok(())
 }
@@ -59,5 +120,5 @@ fn init_environment() {
         .with_max_level(LevelFilter::DEBUG)
         .init();
 
-    info!("Initialized logging and environment");
+    event!(Level::INFO, "Initialized logging and environment");
 }

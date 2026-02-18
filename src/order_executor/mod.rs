@@ -8,7 +8,7 @@ use apca::{
     Client, RequestError, Subscribable,
 };
 use futures::StreamExt;
-use log::info;
+use tracing::{event, Level};
 
 type OrderUpdatesStream = <OrderUpdates as Subscribable>::Stream;
 
@@ -21,7 +21,7 @@ pub struct OrderExecutor {
 
 impl OrderExecutor {
     pub async fn new(client: Arc<Client>) -> Self {
-        info!("Opening live order update connection");
+        event!(Level::INFO, "Opening live order update connection");
         let (stream, _) = client.subscribe::<OrderUpdates>().await.unwrap();
 
         Self { client, stream }
@@ -36,9 +36,9 @@ impl OrderExecutor {
     }
 
     /// Submits an order to the broker for execution
-    #[allow(unused)]
     pub async fn submit_order(&self, order: Order) -> Result<(), RequestError<CreateError>> {
-        info!(
+        event!(
+            Level::INFO,
             "Submitting order {} for {}",
             order.id.as_hyphenated(),
             order.symbol

@@ -7,6 +7,16 @@ pub enum BrokerData {
     Trade(Trade),
 }
 
+impl BrokerData {
+    pub fn symbol(&self) -> &str {
+        match self {
+            BrokerData::Bar(bar) => &bar.symbol,
+            BrokerData::Quote(quote) => &quote.symbol,
+            BrokerData::Trade(trade) => &trade.symbol,
+        }
+    }
+}
+
 impl From<Data> for BrokerData {
     fn from(value: Data) -> Self {
         match value {

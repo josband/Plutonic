@@ -1,9 +1,9 @@
 use apca::data::v2::stream::{drive, MarketData, RealtimeData, IEX};
 use apca::{Client, Subscribable};
 use futures::StreamExt;
-use log::info;
 use std::pin::pin;
 use std::sync::Arc;
+use tracing::{event, Level};
 
 use crate::broker::data::BrokerData;
 
@@ -22,7 +22,7 @@ pub struct AlpacaBroker {
 impl AlpacaBroker {
     pub async fn connect(client: Arc<Client>) -> Self {
         // Subscribe to realtime data, getting a stream (output) and subscription (control input)
-        info!("Opening a connection with Alpaca");
+        event!(Level::INFO, "Opening a connection with Alpaca");
         let (stream, subscription) = client.subscribe::<RealtimeData<IEX>>().await.unwrap();
 
         Self {
@@ -61,7 +61,7 @@ impl AlpacaBroker {
             .unwrap();
     }
 
-    pub async fn next(&mut self) -> Option<BrokerData> {
+    pub async fn next_market_update(&mut self) -> Option<BrokerData> {
         self.stream.next().await.map(|d| d.unwrap().unwrap().into())
     }
 }

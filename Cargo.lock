@@ -974,9 +974,9 @@ dependencies = [
  "apca",
  "dotenv",
  "futures",
- "log",
  "tokio",
  "tokio-util",
+ "tracing",
  "tracing-subscriber",
 ]
 

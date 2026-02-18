@@ -1,13 +1,12 @@
 #![allow(unused)]
 
 mod context;
-mod portfolio;
 mod risk_manager;
 mod strategy;
 
 pub use context::*;
-pub use portfolio::*;
 pub use strategy::*;
+use tracing::{event, Level};
 
 use std::sync::Arc;
 
@@ -16,42 +15,42 @@ use apca::{
     api::v2::{order::Order, updates::OrderUpdate},
     data::v2::stream::MarketData,
 };
-use log::info;
 use tokio::sync::mpsc;
 
 pub struct TradingEngine {
-    ctx: Arc<EngineContext>,
+    ctx: EngineContext,
     strategy_executor: StrategyExecutor<DummyStrategy>,
     risk_manager: RiskManager,
-    portfolio: Portfolio,
 }
 
 impl TradingEngine {
     pub fn new(ctx: EngineContext) -> Self {
-        let ctx = Arc::new(ctx);
         let strategy_executor = StrategyExecutor::new(DummyStrategy);
-        let portfolio = Portfolio {};
         let risk_manager = RiskManager {};
 
         Self {
             ctx,
             strategy_executor,
             risk_manager,
-            portfolio,
         }
     }
 
     pub async fn on_market_data(&self, data: BrokerData) -> Option<Order> {
+        event!(
+            Level::INFO,
+            "Evaluating market strategies on market update for {}",
+            data.symbol()
+        );
+
         let signal = self.strategy_executor.evaluate_strategies(data).await;
-        if signal.signal_type == SignalType::Neutral {
+        if signal.direction() == SignalDirection::Neutral {
+            event!(Level::INFO, "Neutral signal generated. Taking no action");
             return None;
         }
 
         todo!("Need to evaluate risk against the portfolio")
 
-        // Check if the signal adheres to risk strategies
-        //
-        // If passes, generate an order adhering to risk strategies
+        // Generate an order, then check against risk model and if it passes, return the order
     }
 
     pub async fn on_order_update(&self, order_update: OrderUpdate) {
@@ -69,12 +68,10 @@ impl TradingEngine {
 struct DummyStrategy;
 
 impl Strategy for DummyStrategy {
-    fn process(&self, _data: &BrokerData) -> Signal {
-        dbg!("Process called");
-        Signal {
-            signal_type: SignalType::Neutral,
-            symbol: String::new(),
-        }
+    fn process(&self, data: &BrokerData) -> Signal {
+        event!(Level::DEBUG, "Process called");
+
+        Signal::new(data.symbol().to_string(), SignalDirection::Buy)
     }
 }
 // *********************************************************************
