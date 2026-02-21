@@ -27,7 +27,10 @@ impl OrderExecutor {
         Self { client, stream }
     }
 
-    /// Await the next order update event from the broker
+    /// Await the next order update event from the broker.
+    ///
+    /// The OrderExecutor internally tracks order statuses for bookkeeping. Events
+    /// should be passed to both the executor and the [TradingEngine].
     pub async fn next_order_update(&mut self) -> Option<OrderUpdate> {
         self.stream
             .next()

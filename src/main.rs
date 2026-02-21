@@ -91,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start engine task
     tokio::spawn(async move {
         let ctx = EngineContext::new(client);
-        let engine = TradingEngine::new(ctx);
+        let engine = TradingEngine::new(ctx).await;
         loop {
             tokio::select! {
                 _ = data_rx.recv() => {
@@ -118,6 +118,7 @@ fn init_environment() {
     dotenv::dotenv().ok();
     tracing_subscriber::fmt()
         .with_max_level(LevelFilter::DEBUG)
+        .with_ansi(true)
         .init();
 
     event!(Level::INFO, "Initialized logging and environment");
