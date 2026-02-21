@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Start order executor task
-    // let (order_tx, mut order_rx) = mpsc::unbounded_channel();
+    let (order_tx, mut order_rx) = mpsc::unbounded_channel();
     let (order_update_tx, mut order_update_rx) = mpsc::unbounded_channel();
     let order_cancel = cancel.clone();
     let order_client = client.clone();
@@ -72,15 +72,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokio::select! {
                 message = order_executor.next_order_update() => {
                     if let Some(data) = message {
-                        let _ = order_update_tx.send(data);
+                        let _ = order_update_tx.send(data.clone());
+                        order_executor.on_order_update(data).await;
                     }
                     else {
                         event!(Level::WARN, "WebSocket connection closed. Terminating order executor connection.");
                         break;
                     }
                 }
-                // _ = order_rx.recv() => {
-                // }
+                order_opt = order_rx.recv() => {
+                    if let Some(order) = order_opt {
+                        order_executor.submit_order(order).await;
+                    }
+                }
                 _ = order_cancel.cancelled() => {
                     break;
                 }
@@ -89,16 +93,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Start engine task
+    let engine_cancel = cancel.clone();
     tokio::spawn(async move {
         let ctx = EngineContext::new(client);
         let engine = TradingEngine::new(ctx).await;
         loop {
             tokio::select! {
-                _ = data_rx.recv() => {
+                data_opt = data_rx.recv() => {
                     event!(Level::INFO, "Market Update Received");
+                    if let Some(data) = data_opt {
+                        if let Some(order) = engine.on_market_data(data).await {
+                            order_tx.send(order);
+                        }
+                    }
                 }
                 _ = order_update_rx.recv() => {
                     event!(Level::INFO, "Order Update Received");
+                }
+                _ = engine_cancel.cancelled() => {
+                    break;
                 }
             }
         }
