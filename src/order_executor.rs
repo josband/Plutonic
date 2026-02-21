@@ -46,6 +46,7 @@ impl OrderExecutor {
             order.id.as_hyphenated(),
             order.symbol
         );
+
         let request = apca_order::CreateReqInit {
             ..Default::default()
         }
