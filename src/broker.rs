@@ -1,15 +1,9 @@
-use apca::data::v2::stream::{drive, MarketData, RealtimeData, IEX};
+use apca::data::v2::stream::{drive, Data, MarketData, RealtimeData, IEX};
 use apca::{Client, Subscribable};
 use futures::StreamExt;
 use std::pin::pin;
 use std::sync::Arc;
 use tracing::{event, Level};
-
-use crate::broker::data::BrokerData;
-
-pub mod data;
-
-// TODO: impl next() or something like that for AlpacaBroker
 
 type LiveDataStream = <RealtimeData<IEX> as Subscribable>::Stream;
 type LiveDataSubscription = <RealtimeData<IEX> as Subscribable>::Subscription;
@@ -34,10 +28,8 @@ impl AlpacaBroker {
     pub async fn subscribe(&mut self, symbol: &'static str) {
         let mut new_subs = MarketData::default();
         new_subs.set_bars([symbol]);
-        new_subs.set_quotes([symbol]);
-        new_subs.set_trades([symbol]);
 
-        let subscription_command = Box::pin(self.subscription.subscribe(&new_subs));
+        let subscription_command = pin!(self.subscription.subscribe(&new_subs));
 
         let () = drive(subscription_command, &mut self.stream)
             .await
@@ -49,8 +41,6 @@ impl AlpacaBroker {
     pub async fn unsubscribe(&mut self, symbol: &'static str) {
         let mut new_subs = MarketData::default();
         new_subs.set_bars([symbol]);
-        new_subs.set_quotes([symbol]);
-        new_subs.set_trades([symbol]);
 
         let subscription_command = pin!(self.subscription.unsubscribe(&new_subs));
 
@@ -61,7 +51,7 @@ impl AlpacaBroker {
             .unwrap();
     }
 
-    pub async fn next_market_update(&mut self) -> Option<BrokerData> {
-        self.stream.next().await.map(|d| d.unwrap().unwrap().into())
+    pub async fn next_market_update(&mut self) -> Option<Data> {
+        self.stream.next().await.map(|d| d.unwrap().unwrap())
     }
 }

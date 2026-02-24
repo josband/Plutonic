@@ -1,44 +1,50 @@
 #![allow(unused)]
 
-mod context;
 mod risk_manager;
 mod strategy;
 
-pub use context::*;
 pub use strategy::*;
+
+use num_decimal::Num;
+use std::{cmp::min, collections::HashMap, ops::Mul, sync::Arc};
 use tracing::{event, Level};
 
-use std::{collections::HashMap, sync::Arc};
-
-use crate::{broker::data::BrokerData, engine::risk_manager::RiskManager};
+use crate::engine::risk_manager::{RiskDecision, RiskManager};
 use apca::{
     api::v2::{
+        account::{self, Account},
         asset::{self, Symbol},
         assets,
-        order::Order,
+        order::{
+            self, Amount, Class, CreateReq, Order, Side, StopLoss, TakeProfit, TimeInForce, Type,
+        },
         position::{self, Position},
         positions,
         updates::{OrderStatus, OrderUpdate},
     },
-    data::v2::stream::MarketData,
+    data::v2::stream::{Bar, MarketData},
+    Client,
 };
 use tokio::sync::mpsc;
 
+/// Engine containing core strategy logic, order management, and risk management.
+///
+/// The TradingEngine is the sole source of truth of positions, order status, cash balance etc.
 pub struct TradingEngine {
-    ctx: EngineContext,
+    client: Arc<Client>,
     strategy_executor: StrategyExecutor<DummyStrategy>,
     risk_manager: RiskManager,
     portfolio: HashMap<asset::Id, Position>,
+    account: Account,
 }
 
 impl TradingEngine {
-    pub async fn new(ctx: EngineContext) -> Self {
+    pub async fn new(client: Arc<Client>) -> Self {
         let strategy_executor = StrategyExecutor::new(DummyStrategy);
         let risk_manager = RiskManager {};
 
         // Get existing positions
-        let portfolio = ctx
-            .client
+        let portfolio = client
             .issue::<positions::List>(&())
             .await
             .unwrap_or_else(|_| vec![])
@@ -46,50 +52,75 @@ impl TradingEngine {
             .map(|p| (p.asset_id, p))
             .collect();
 
+        // Get account information
+        let account = client.issue::<account::Get>(&()).await.unwrap();
+
         Self {
-            ctx,
+            client,
             strategy_executor,
             risk_manager,
             portfolio,
+            account,
         }
     }
 
-    pub async fn on_market_data(&self, data: BrokerData) -> Option<Order> {
+    pub async fn on_bar(&self, bar: Bar) -> Option<CreateReq> {
         event!(
             Level::INFO,
             "Evaluating market strategies on market update for {}",
-            data.symbol()
+            bar.symbol
         );
 
-        let signal = self.strategy_executor.evaluate_strategies(data).await;
+        let signal = self.strategy_executor.evaluate_strategies(&bar).await;
         if signal.direction() == SignalDirection::Neutral {
             event!(Level::INFO, "Neutral signal generated. Taking no action");
             return None;
         }
 
-        todo!("Need to evaluate risk against the portfolio")
+        let mut initial_order = order::CreateReqInit {
+            class: Class::Simple,
+            type_: Type::Limit,
+            limit_price: Some(bar.close_price),
+            time_in_force: TimeInForce::Day,
+            ..Default::default()
+        }
+        .init(
+            &bar.symbol,
+            Side::Buy,
+            Amount::notional(min(
+                &self.account.equity * Num::new(2, 100),
+                self.account.cash.clone(),
+            )),
+        );
 
-        // Generate an order, then check against risk model and if it passes, return the order
+        match self.risk_manager.evaluate_order(&initial_order) {
+            RiskDecision::Accept => Some(initial_order),
+            RiskDecision::Modify(new) => Some(*new),
+            RiskDecision::Reject(msg) => {
+                event!(Level::WARN, "Order rejected: {}", msg);
+                None
+            }
+        }
     }
 
     /// Handler for order updates.
     ///
     /// When submitted orders for the account are updated, the engine should
     /// be notified to manage it's internal state and take any necessary actions.
-    pub async fn on_order_update(&self, order_update: OrderUpdate) {
+    pub async fn on_order_update(&mut self, order_update: OrderUpdate) {
         match order_update.event {
             OrderStatus::PartialFill | OrderStatus::Filled => {
-                // This is not the fasted, but since this is not a HFT bot, the overhead is considered acceptable.
-                // Maybe this will be considered
+                // This is not the fastest, but since this is not a HFT bot, the overhead is considered acceptable. but it should be improved
                 let order = order_update.order;
                 let updated_position = self
-                    .ctx
                     .client
                     .issue::<position::Get>(&Symbol::Id(order.asset_id))
                     .await;
 
                 match updated_position {
-                    Ok(p) => todo!(),
+                    Ok(p) => {
+                        self.portfolio.insert(p.asset_id, p);
+                    }
                     Err(e) => event!(
                         Level::ERROR,
                         "Unable to fetch position info for {} of ID: {}",
@@ -97,6 +128,8 @@ impl TradingEngine {
                         order.asset_id.0
                     ),
                 }
+
+                self.account = self.client.issue::<account::Get>(&()).await.unwrap();
             }
             _ => {
                 event!(
@@ -108,35 +141,16 @@ impl TradingEngine {
             }
         }
     }
-
-    /// Synchronizes the internal state with the broker's data.
-    ///
-    /// In reality, this method should not be needed. However, it is
-    /// offered as a utlity to ensure internal state is correct. If calling this method,
-    /// it might be indicative of a problem with logic.
-    pub async fn synchronize(&mut self) {
-        let portfolio = self
-            .ctx
-            .client
-            .issue::<positions::List>(&())
-            .await
-            .unwrap_or_else(|_| vec![])
-            .into_iter()
-            .map(|p| (p.asset_id, p))
-            .collect();
-
-        self.portfolio = portfolio;
-    }
 }
 
 // *********************** REMOVE **************************************
 struct DummyStrategy;
 
 impl Strategy for DummyStrategy {
-    fn process(&self, data: &BrokerData) -> Signal {
+    fn process(&self, data: &Bar) -> Signal {
         event!(Level::DEBUG, "Process called");
 
-        Signal::new(data.symbol().to_string(), SignalDirection::Buy)
+        Signal::new(data.symbol.to_string(), SignalDirection::Buy)
     }
 }
 // *********************************************************************

@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use apca::{
     api::v2::{
-        order::{self as apca_order, CreateError, Id, Order},
+        order::{self as apca_order, CreateError, CreateReq, Id, Order},
         orders::{self, ListReq},
         updates::{OrderStatus, OrderUpdate, OrderUpdates},
     },
@@ -84,21 +84,11 @@ impl OrderExecutor {
     }
 
     /// Submits an order to the broker for execution
-    pub async fn submit_order(&self, order: Order) -> Result<(), RequestError<CreateError>> {
-        event!(
-            Level::INFO,
-            "Submitting order {} for {}",
-            order.id.as_hyphenated(),
-            order.symbol
-        );
-
-        let request = apca_order::CreateReqInit {
-            ..Default::default()
-        }
-        .init(order.symbol, order.side, order.amount);
+    pub async fn submit_order(&self, order: CreateReq) -> Result<(), RequestError<CreateError>> {
+        event!(Level::INFO, "Submitting order for {}", order.symbol);
 
         self.client
-            .issue::<apca_order::Create>(&request)
+            .issue::<apca_order::Create>(&order)
             .await
             .map(|_| ())
     }

@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
-use apca::{ApiInfo, Client};
-use plutonic::{
-    broker::AlpacaBroker,
-    engine::{EngineContext, TradingEngine},
-    order_executor::OrderExecutor,
-};
+use apca::{data::v2::stream::Data, ApiInfo, Client};
+use plutonic::{broker::AlpacaBroker, engine::TradingEngine, order_executor::OrderExecutor};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{event, Level};
@@ -43,10 +39,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         let mut broker = AlpacaBroker::connect(broker_client).await;
         broker.subscribe("AAPL").await;
+        broker.subscribe("NVDA").await;
+        broker.subscribe("DE").await;
         loop {
             tokio::select! {
                 data_opt = broker.next_market_update() => {
                     if let Some(data) = data_opt {
+                        event!(Level::DEBUG, "Received market data: {:?}", data);
                         let _ = data_tx.send(data);
                     }
                     else {
@@ -81,8 +80,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 order_opt = order_rx.recv() => {
-                    if let Some(order) = order_opt {
-                        order_executor.submit_order(order).await;
+                    if let Some(order_req) = order_opt {
+                        order_executor.submit_order(order_req).await;
                     }
                 }
                 _ = order_cancel.cancelled() => {
@@ -95,15 +94,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start engine task
     let engine_cancel = cancel.clone();
     tokio::spawn(async move {
-        let ctx = EngineContext::new(client);
-        let engine = TradingEngine::new(ctx).await;
+        let engine = TradingEngine::new(client).await;
         loop {
             tokio::select! {
                 data_opt = data_rx.recv() => {
                     event!(Level::INFO, "Market Update Received");
-                    if let Some(data) = data_opt {
-                        if let Some(order) = engine.on_market_data(data).await {
-                            order_tx.send(order);
+                    if let Some(Data::Bar(bar)) = data_opt {
+                        if let Some(order_req) = engine.on_bar(bar).await {
+                            order_tx.send(order_req);
                         }
                     }
                 }

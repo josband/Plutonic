@@ -1,4 +1,4 @@
-use crate::broker::data::BrokerData;
+use apca::data::v2::stream::Bar;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signal {
@@ -36,7 +36,7 @@ pub trait Strategy {
     /// Process a market update.
     ///
     /// This method should be implemented by concrete strategy implementations to process incoming market data and generate trading signals.
-    fn process(&self, data: &BrokerData) -> Signal;
+    fn process(&self, data: &Bar) -> Signal;
 }
 
 /// A metric relating to an asset.
@@ -66,8 +66,8 @@ impl<S: Strategy> StrategyExecutor<S> {
         StrategyExecutor { strategy }
     }
 
-    pub async fn evaluate_strategies(&self, data: BrokerData) -> Signal {
+    pub async fn evaluate_strategies(&self, data: &Bar) -> Signal {
         // Will become more complex as the executor evolves to handle multiple strategies and indicators
-        self.strategy.process(&data)
+        self.strategy.process(data)
     }
 }
