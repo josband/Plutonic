@@ -1,31 +1,28 @@
-#![allow(unused)]
-
 mod risk_manager;
 mod strategy;
 
 pub use strategy::*;
 
 use num_decimal::Num;
-use std::{cmp::min, collections::HashMap, ops::Mul, sync::Arc};
+use std::{cmp::min, collections::HashMap, sync::Arc};
 use tracing::{event, Level};
 
-use crate::engine::risk_manager::{RiskDecision, RiskManager};
+use crate::engine::{
+    risk_manager::{RiskDecision, RiskManager},
+    signal::{Signal, SignalDirection},
+};
 use apca::{
     api::v2::{
         account::{self, Account},
-        asset::{self, Symbol},
-        assets,
-        order::{
-            self, Amount, Class, CreateReq, Order, Side, StopLoss, TakeProfit, TimeInForce, Type,
-        },
+        asset::Symbol,
+        order::{self, Amount, Class, CreateReq, Side, TimeInForce, Type},
         position::{self, Position},
         positions,
         updates::{OrderStatus, OrderUpdate},
     },
-    data::v2::stream::{Bar, MarketData},
+    data::v2::stream::Bar,
     Client,
 };
-use tokio::sync::mpsc;
 
 /// Engine containing core strategy logic, order management, and risk management.
 ///
@@ -34,14 +31,14 @@ pub struct TradingEngine {
     client: Arc<Client>,
     strategy_executor: StrategyExecutor<DummyStrategy>,
     risk_manager: RiskManager,
-    portfolio: HashMap<asset::Id, Position>,
+    portfolio: HashMap<String, Position>,
     account: Account,
 }
 
 impl TradingEngine {
     pub async fn new(client: Arc<Client>) -> Self {
         let strategy_executor = StrategyExecutor::new(DummyStrategy);
-        let risk_manager = RiskManager {};
+        let risk_manager = RiskManager::new();
 
         // Get existing positions
         let portfolio = client
@@ -49,7 +46,7 @@ impl TradingEngine {
             .await
             .unwrap_or_else(|_| vec![])
             .into_iter()
-            .map(|p| (p.asset_id, p))
+            .map(|p| (p.symbol.clone(), p))
             .collect();
 
         // Get account information
@@ -77,21 +74,7 @@ impl TradingEngine {
             return None;
         }
 
-        let mut initial_order = order::CreateReqInit {
-            class: Class::Simple,
-            type_: Type::Limit,
-            limit_price: Some(bar.close_price),
-            time_in_force: TimeInForce::Day,
-            ..Default::default()
-        }
-        .init(
-            &bar.symbol,
-            Side::Buy,
-            Amount::notional(min(
-                &self.account.equity * Num::new(2, 100),
-                self.account.cash.clone(),
-            )),
-        );
+        let initial_order = self.create_order_req(signal.direction().order_side()?, &bar)?;
 
         match self.risk_manager.evaluate_order(&initial_order) {
             RiskDecision::Accept => Some(initial_order),
@@ -101,6 +84,33 @@ impl TradingEngine {
                 None
             }
         }
+    }
+
+    fn create_order_req(&self, side: Side, bar: &Bar) -> Option<CreateReq> {
+        let order_amount = match side {
+            Side::Buy => Amount::notional(min(
+                &self.account.equity * Num::new(2, 100),
+                self.account.cash.clone(),
+            )),
+            Side::Sell => {
+                let current_position = self.portfolio.get(&bar.symbol)?;
+                let position_size = current_position.quantity_available.clone()
+                    * current_position.current_price.as_ref()?;
+
+                Amount::notional(min(&self.account.equity * Num::new(2, 100), position_size))
+            }
+        };
+
+        Some(
+            order::CreateReqInit {
+                class: Class::Simple,
+                type_: Type::Limit,
+                limit_price: Some(bar.close_price.clone()),
+                time_in_force: TimeInForce::Day,
+                ..Default::default()
+            }
+            .init(&bar.symbol, side, order_amount),
+        )
     }
 
     /// Handler for order updates.
@@ -119,13 +129,14 @@ impl TradingEngine {
 
                 match updated_position {
                     Ok(p) => {
-                        self.portfolio.insert(p.asset_id, p);
+                        self.portfolio.insert(p.symbol.clone(), p);
                     }
                     Err(e) => event!(
                         Level::ERROR,
-                        "Unable to fetch position info for {} of ID: {}",
+                        "Unable to fetch position info for {} of ID: {}, {}",
                         order.symbol,
-                        order.asset_id.0
+                        order.asset_id.0,
+                        e
                     ),
                 }
 
