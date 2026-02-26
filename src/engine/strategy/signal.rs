@@ -4,7 +4,7 @@ use apca::api::v2::order::Side;
 ///
 /// Trading signals are automated, data-driven triggers that indicate an
 /// action to be taken by a trading engine.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Signal {
     symbol: String,
     direction: SignalDirection,
@@ -26,7 +26,7 @@ impl Signal {
 ///
 /// Directions indicate the particular action to be taken. This
 /// can be either to buy, sell, or hold a particular asset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SignalDirection {
     Buy,
     Neutral,

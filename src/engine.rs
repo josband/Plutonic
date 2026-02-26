@@ -29,7 +29,7 @@ use apca::{
 /// The TradingEngine is the sole source of truth of positions, order status, cash balance etc.
 pub struct TradingEngine {
     client: Arc<Client>,
-    strategy_executor: StrategyExecutor<DummyStrategy>,
+    strategy_executor: StrategyExecutor,
     risk_manager: RiskManager,
     portfolio: HashMap<String, Position>,
     account: Account,
@@ -37,7 +37,8 @@ pub struct TradingEngine {
 
 impl TradingEngine {
     pub async fn new(client: Arc<Client>) -> Self {
-        let strategy_executor = StrategyExecutor::new(DummyStrategy);
+        let mut strategy_executor = StrategyExecutor::new();
+        strategy_executor.register_strategy(DummyStrategy);
         let risk_manager = RiskManager::new();
 
         // Get existing positions
@@ -68,7 +69,7 @@ impl TradingEngine {
             bar.symbol
         );
 
-        let signal = self.strategy_executor.evaluate_strategies(&bar).await;
+        let signal: Signal = self.strategy_executor.evaluate_strategies(&bar).await;
         if signal.direction() == SignalDirection::Neutral {
             event!(Level::INFO, "Neutral signal generated. Taking no action");
             return None;

@@ -1,11 +1,13 @@
+use std::collections::HashMap;
+
 use apca::data::v2::stream::Bar;
 
-use crate::engine::strategy::signal::Signal;
+use crate::engine::{signal::SignalDirection, strategy::signal::Signal};
 
 pub mod signal;
 
 /// Trait encapsulating the core logic of a trading strategy.
-pub trait Strategy {
+pub trait Strategy: Send + Sync + 'static {
     /// Process a market update.
     ///
     /// This method should be implemented by concrete strategy implementations to process incoming market data and generate trading signals.
@@ -30,17 +32,37 @@ pub trait Indicator {
 /// Layer Responsible for the processing of live data.
 ///
 /// The data processor should ingest live data as it comes in, calculate indicators needed for a strategy
-pub struct StrategyExecutor<S: Strategy> {
-    strategy: S,
+pub struct StrategyExecutor {
+    strategies: Vec<Box<dyn Strategy>>,
 }
 
-impl<S: Strategy> StrategyExecutor<S> {
-    pub fn new(strategy: S) -> Self {
-        StrategyExecutor { strategy }
+impl StrategyExecutor {
+    pub fn new() -> Self {
+        StrategyExecutor { strategies: vec![] }
+    }
+
+    pub fn register_strategy<S: Strategy>(&mut self, strategy: S) {
+        self.strategies.push(Box::new(strategy));
     }
 
     pub async fn evaluate_strategies(&self, data: &Bar) -> Signal {
-        // Will become more complex as the executor evolves to handle multiple strategies and indicators
-        self.strategy.process(data)
+        let mut counts = HashMap::new();
+        self.strategies.iter().for_each(|s| {
+            *counts.entry(s.process(data).direction()).or_insert(0) += 1;
+        });
+
+        let dir = counts
+            .iter()
+            .max_by_key(|&(_, v)| *v)
+            .map(|(k, _)| *k)
+            .unwrap_or(SignalDirection::Neutral);
+
+        Signal::new(data.symbol.clone(), dir)
+    }
+}
+
+impl Default for StrategyExecutor {
+    fn default() -> Self {
+        Self::new()
     }
 }
