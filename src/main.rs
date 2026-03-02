@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start engine task
     let engine_cancel = cancel.clone();
     tokio::spawn(async move {
-        let engine = TradingEngine::new(client).await;
+        let mut engine = TradingEngine::new(client).await;
         loop {
             tokio::select! {
                 data_opt = data_rx.recv() => {

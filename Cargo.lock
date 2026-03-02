@@ -988,6 +988,7 @@ name = "plutonic"
 version = "0.1.0"
 dependencies = [
  "apca",
+ "chrono",
  "dotenv",
  "futures",
  "num-decimal",

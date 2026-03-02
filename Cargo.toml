@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 apca = "0.30.0"
+chrono = "0.4.44"
 dotenv = "0.15.0"
 futures = "0.3.31"
 num-decimal = { version = "0.2.5", default-features = false }
