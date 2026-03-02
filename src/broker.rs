@@ -29,6 +29,17 @@ impl AlpacaBroker {
         let mut new_subs = MarketData::default();
         new_subs.set_bars([symbol]);
 
+        self.update_subscription(new_subs).await;
+    }
+
+    pub async fn subscribe_to_all(&mut self, symbols: &[&'static str]) {
+        let mut new_subs = MarketData::default();
+        new_subs.set_bars(symbols.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+
+        self.update_subscription(new_subs).await;
+    }
+
+    async fn update_subscription(&mut self, new_subs: MarketData) {
         let subscription_command = pin!(self.subscription.subscribe(&new_subs));
 
         let () = drive(subscription_command, &mut self.stream)
@@ -39,9 +50,20 @@ impl AlpacaBroker {
     }
 
     pub async fn unsubscribe(&mut self, symbol: &'static str) {
-        let mut new_subs = MarketData::default();
-        new_subs.set_bars([symbol]);
+        let mut removed_subs = MarketData::default();
+        removed_subs.set_bars([symbol]);
 
+        self.perform_unsubscribe(removed_subs).await;
+    }
+
+    pub async fn unsubscribe_to_all(&mut self, symbols: &[&'static str]) {
+        let mut removed_subs = MarketData::default();
+        removed_subs.set_bars(symbols.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+
+        self.perform_unsubscribe(removed_subs).await;
+    }
+
+    async fn perform_unsubscribe(&mut self, new_subs: MarketData) {
         let subscription_command = pin!(self.subscription.unsubscribe(&new_subs));
 
         let () = drive(subscription_command, &mut self.stream)
