@@ -1,17 +1,21 @@
 use std::collections::HashMap;
 
 use apca::data::v2::stream::Bar;
+use async_trait::async_trait;
+use futures::StreamExt;
 
 use crate::engine::{signal::SignalDirection, strategy::signal::Signal};
 
 pub mod signal;
+pub mod strategies;
 
 /// Trait encapsulating the core logic of a trading strategy.
+#[async_trait]
 pub trait Strategy: Send + Sync + 'static {
     /// Process a market update.
     ///
     /// This method should be implemented by concrete strategy implementations to process incoming market data and generate trading signals.
-    fn process(&self, data: &Bar) -> Signal;
+    async fn process(&mut self, bar: &Bar) -> Signal;
 }
 
 /// A metric relating to an asset.
@@ -45,19 +49,28 @@ impl StrategyExecutor {
         self.strategies.push(Box::new(strategy));
     }
 
-    pub async fn evaluate_strategies(&self, data: &Bar) -> Signal {
-        let mut counts = HashMap::new();
-        self.strategies.iter().for_each(|s| {
-            *counts.entry(s.process(data).direction()).or_insert(0) += 1;
-        });
+    pub async fn evaluate_strategies(&mut self, bar: &Bar) -> Signal {
+        // TODO: Make this concurrent by using `map` and `buffered` instead of `then`
+        let counts = futures::stream::iter(&mut self.strategies)
+            .then(|s| async move {
+                let bar = bar.clone();
+                s.process(&bar).await
+            })
+            .fold(HashMap::new(), |mut counts, s| async move {
+                *counts.entry(s.direction()).or_insert(0) += 1;
+                counts
+            })
+            .await;
 
-        let dir = counts
-            .iter()
-            .max_by_key(|&(_, v)| *v)
-            .map(|(k, _)| *k)
-            .unwrap_or(SignalDirection::Neutral);
+        let max_count = counts.values().max().copied().unwrap_or(0);
+        let winners: Vec<_> = counts.iter().filter(|(_, &v)| v == max_count).collect();
+        let dir = if winners.len() == 1 {
+            *winners[0].0
+        } else {
+            SignalDirection::Neutral
+        };
 
-        Signal::new(data.symbol.clone(), dir)
+        Signal::new(bar.symbol.clone(), dir)
     }
 }
 
