@@ -8,7 +8,6 @@ use tracing::{event, Level};
 use tracing_subscriber::filter::LevelFilter;
 
 #[tokio::main]
-#[allow(unused)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_environment();
 
@@ -81,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 order_opt = order_rx.recv() => {
                     if let Some(order_req) = order_opt {
-                        order_executor.submit_order(order_req).await;
+                        let _ = order_executor.submit_order(order_req).await;
                     }
                 }
                 _ = order_cancel.cancelled() => {
@@ -101,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     event!(Level::INFO, "Market Update Received");
                     if let Some(Data::Bar(bar)) = data_opt {
                         if let Some(order_req) = engine.on_bar(bar).await {
-                            order_tx.send(order_req);
+                            let _ = order_tx.send(order_req);
                         }
                     }
                 }
@@ -128,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn init_environment() {
     dotenv::dotenv().ok();
     tracing_subscriber::fmt()
-        .with_max_level(LevelFilter::DEBUG)
+        .with_max_level(LevelFilter::INFO)
         .with_ansi(true)
         .init();
 

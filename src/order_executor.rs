@@ -13,7 +13,6 @@ use tracing::{event, Level};
 
 type OrderUpdateStream = <OrderUpdates as Subscribable>::Stream;
 
-#[allow(unused)]
 pub struct OrderExecutor {
     client: Arc<Client>,
     stream: OrderUpdateStream,
